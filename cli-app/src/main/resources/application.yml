@@ -1,0 +1,10 @@
+spring:
+  main:
+    banner-mode: off
+  shell:
+    interactive:
+      enabled: true
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: cli-app

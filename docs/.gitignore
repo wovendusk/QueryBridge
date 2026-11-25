@@ -1,0 +1,43 @@
+# ==============================================================================
+# .gitignore — files git should NOT track.   (guide step 41 — 30 seconds)
+# ==============================================================================
+# Each line is a pattern. Matching files are invisible to `git status` /
+# `git add`. A leading `!` re-includes something an earlier pattern excluded.
+# ==============================================================================
+
+# Build output
+# Maven writes compiled classes and jars to <module>/target/. Always rebuildable,
+# so never committed.
+target/
+# Exception: the Maven Wrapper's jar (if a project uses ./mvnw). This project
+# has no .mvn folder, so this line currently does nothing.
+!.mvn/wrapper/maven-wrapper.jar
+
+# IDE
+# Editor/IDE project files (IntelliJ, VS Code, Eclipse) and Vim swap files.
+# Personal to each developer, so not shared.
+.idea/
+*.iml
+.vscode/
+.settings/
+.project
+.classpath
+*.swp
+*.swo
+
+# Environment and secrets
+# .env holds OPENAI_API_KEY etc., which docker-compose reads. NEVER commit it:
+# a key pushed to a public repo gets scraped and abused within minutes.
+.env
+# Presumably a file where the author kept an API key at some point.
+api.txt
+
+# OS
+# macOS Finder and Windows Explorer metadata files.
+.DS_Store
+Thumbs.db
+
+# Logs
+# Any *.log file. (Spring Shell's command-history file, if it is named
+# spring-shell.log as I believe it is, is covered by this too.)
+*.log

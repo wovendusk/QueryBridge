@@ -1,0 +1,173 @@
+# ==============================================================================
+# docker-compose.yml — runs Kafka + the three apps as containers.
+# (guide step 40 — read after all the Java, so every name here means something)
+# ==============================================================================
+#
+# WHAT DOCKER COMPOSE DOES
+#   It reads this file and starts one container per entry under `services:`.
+#   All of them are put on one private virtual network, where each container
+#   can reach the others BY SERVICE NAME (the llm-service container reaches
+#   Kafka at the hostname "kafka").
+#
+#   Typical commands (from the project root, AFTER `mvn clean package -DskipTests`):
+#     docker compose up -d --build kafka llm-service query-executor   # start the backend in the background
+#     docker compose run --rm cli                                     # start the CLI attached to your terminal
+#     docker compose logs -f llm-service                              # follow a service's logs
+#     docker compose down                                             # stop and remove everything
+#   (Plain `docker compose up -d` without --build reuses an image if one already
+#    exists, so after code changes add --build.)
+#
+# THE ${VAR} AND ${VAR:-default} SYNTAX
+#   Compose substitutes variables from your shell environment AND from a file
+#   named `.env` next to this file (which is .gitignored — your API key lives
+#   there). ${VAR:-default} = "VAR if set and non-empty, else default".
+#
+# NO DATABASE HERE
+#   Notice there's no PostgreSQL service. QueryBridge connects to YOUR
+#   existing database, wherever it lives. Since both the CLI (schema read)
+#   and the executor (queries) must reach it, a cloud database with a public
+#   hostname is the easiest fit — which matches ConnectionManager's
+#   hard-coded sslmode=require.
+# ==============================================================================
+
+services:
+
+  # ----------------------------------------------------------------------------
+  # KAFKA — a single broker in KRaft mode (no ZooKeeper).
+  # ----------------------------------------------------------------------------
+  # Historically Kafka needed a separate ZooKeeper cluster to store its
+  # metadata (which topics exist, who leads which partition...). Since Kafka
+  # 3.x, "KRaft" mode builds that into Kafka itself: some nodes act as
+  # "controllers" (the metadata quorum, using the Raft consensus algorithm).
+  # Here ONE node plays both roles — broker AND controller — which is the
+  # simplest possible setup, fine for development.
+  kafka:
+    # Confluent's Kafka image. cp-kafka 7.6 corresponds to Apache Kafka 3.6.
+    # This image is configured entirely through KAFKA_* environment variables:
+    # KAFKA_SOME_SETTING maps to the broker setting some.setting.
+    image: confluentinc/cp-kafka:7.6.0
+    hostname: kafka              # the container's own hostname
+    container_name: qb-kafka     # fixed container name (instead of a generated one)
+    environment:
+      # Unique ID of this node in the cluster.
+      KAFKA_NODE_ID: 1
+      # This node is both a broker (stores/serves messages) and a controller
+      # (manages metadata). "Combined mode".
+      KAFKA_PROCESS_ROLES: broker,controller
+
+      # ---- LISTENERS: the most confusing part of Kafka config, so slowly ----
+      # A "listener" is a socket the node listens on, with a NAME. Three here:
+      #   PLAINTEXT  port 9092  - for clients INSIDE the compose network
+      #   CONTROLLER port 9093  - internal KRaft controller traffic
+      #   EXTERNAL   port 29092 - for clients on your HOST machine
+      # 0.0.0.0 = listen on all network interfaces of the container.
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,EXTERNAL://0.0.0.0:29092
+      # ADVERTISED listeners = the address the broker TELLS clients to use.
+      # This is the key subtlety: a client first connects to its bootstrap
+      # address, the broker replies "for this partition, talk to me at
+      # <advertised address>", and the client reconnects THERE. So:
+      #   a container connecting via kafka:9092 is told "kafka:9092"     -> resolvable inside Docker ✓
+      #   your host connecting via localhost:29092 is told "localhost:29092" -> resolvable on the host ✓
+      # If the EXTERNAL listener advertised "kafka:29092", your host could
+      # bootstrap but then fail, because your machine can't resolve "kafka".
+      # That's why two listeners exist, and why host-run apps MUST use
+      # localhost:29092 (not the apps' default localhost:9092).
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:29092
+      # Which security protocol each listener NAME uses. All PLAINTEXT = no TLS,
+      # no authentication. (Remember: DB passwords travel through here.)
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT
+      # The controller quorum: "node 1 at kafka:9093". Format id@host:port.
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      # Which listener name is the controller one.
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      # Which listener brokers use to talk to each other (only one broker here, but required).
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+
+      # ---- single-broker adjustments ----
+      # Kafka keeps internal topics: __consumer_offsets (committed offsets of
+      # every consumer group) and the transaction log. Their default
+      # replication factor is 3, which is IMPOSSIBLE with one broker, so they
+      # must be lowered to 1 or consumer groups won't work.
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1   # min in-sync replicas for the transaction log
+
+      # KRaft needs a cluster ID to format its storage on first start. It's
+      # a base64-encoded UUID; any valid one works, it just has to stay the same.
+      CLUSTER_ID: MkU3OEJFNjI2NTQ3MjQ2Mg
+    ports:
+      # Publish container port 29092 on host port 29092 — ONLY the EXTERNAL
+      # listener is reachable from your machine. 9092 stays inside Docker.
+      - "29092:29092"
+    healthcheck:
+      # Docker runs this command inside the container periodically. If listing
+      # topics works, Kafka is up and answering. Other services wait for this
+      # to pass (condition: service_healthy) before starting.
+      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9092", "--list"]
+      interval: 10s   # check every 10 seconds
+      timeout: 5s     # a check taking longer than 5s counts as failed
+      retries: 5      # 5 consecutive failures -> marked "unhealthy"
+    # Note: no `volumes:` — Kafka's data lives inside the container. `docker
+    # compose down` deletes it (all topics, all committed offsets). That's
+    # actually convenient for development: every fresh start is clean.
+
+  # ----------------------------------------------------------------------------
+  # LLM SERVICE
+  # ----------------------------------------------------------------------------
+  llm-service:
+    # Build the image from ./llm-service/Dockerfile (which copies the prebuilt jar).
+    build: ./llm-service
+    container_name: qb-llm-service
+    depends_on:
+      kafka:
+        # Don't start until Kafka's healthcheck passes. Without this the app
+        # would start, fail to reach Kafka, and spam connection errors.
+        condition: service_healthy
+    environment:
+      # These become environment variables in the container, which Spring's
+      # ${...} placeholders in application.yml pick up.
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092                             # internal listener, by service name
+      OPENAI_API_KEY: ${OPENAI_API_KEY}                               # from .env — required
+      OPENAI_API_URL: ${OPENAI_API_URL:-https://api.openai.com/v1}    # optional override
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}                      # optional override
+    # If the process crashes, Docker restarts it — unless you stopped it yourself.
+    restart: unless-stopped
+
+  # ----------------------------------------------------------------------------
+  # QUERY EXECUTOR
+  # ----------------------------------------------------------------------------
+  query-executor:
+    build: ./query-executor
+    container_name: qb-query-executor
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    # This container makes OUTBOUND connections to your database (whatever
+    # host you pass to `connect`). Outbound internet access works by default.
+    restart: unless-stopped
+
+  # ----------------------------------------------------------------------------
+  # CLI — the interactive terminal app.
+  # ----------------------------------------------------------------------------
+  cli:
+    build: ./cli-app
+    container_name: qb-cli
+    depends_on:
+      kafka:
+        condition: service_healthy
+      # service_started = "the container has started" — NOT "the app inside is
+      # ready". The backend services have no healthcheck, so this is the best
+      # compose can do. In practice they're ready long before you type `connect`.
+      llm-service:
+        condition: service_started
+      query-executor:
+        condition: service_started
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    # Interactive terminal support (= `docker run -it`): keep stdin open and
+    # allocate a TTY so Spring Shell/JLine work properly.
+    stdin_open: true
+    tty: true
+    # Run it with: docker compose run --rm cli

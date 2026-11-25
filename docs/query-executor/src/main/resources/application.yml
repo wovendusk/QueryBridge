@@ -1,0 +1,50 @@
+# ==============================================================================
+# query-executor/src/main/resources/application.yml   (guide step 11)
+# ==============================================================================
+# Spring Boot reads this file automatically at startup (anything named
+# application.yml / application.properties in src/main/resources ends up at
+# the root of the classpath, which is where Boot looks).
+#
+# The ${NAME:default} syntax means: "use the environment variable / system
+# property NAME if it is set, otherwise use `default`". That is how the same
+# jar works both on your laptop (defaults) and inside Docker (docker-compose
+# sets the env vars).
+# ==============================================================================
+
+server:
+  # The HTTP port... for a server that does not exist. This app has no web
+  # server (no spring-boot-starter-web dependency, and web-application-type is
+  # `none` just below), so this setting is ignored. It's a harmless leftover;
+  # it would only matter if someone later added a web dependency.
+  port: 8082
+
+spring:
+  main:
+    # Tell Spring Boot "this is NOT a web application, don't try to start
+    # Tomcat/Netty". Without a web dependency Boot would conclude that by
+    # itself; this line just makes it explicit and future-proof.
+    # How does the app keep running then, if there's no web server keeping the
+    # JVM alive? The Kafka listener container starts its own non-daemon
+    # consumer thread, and the JVM doesn't exit while that thread is alive.
+    web-application-type: none
+  kafka:
+    # Where Kafka is. "bootstrap servers" = the first broker(s) the client
+    # contacts to learn about the whole cluster.
+    #   - Inside docker-compose this is set to kafka:9092 (the broker's
+    #     internal listener; "kafka" is the container's hostname on the compose
+    #     network).
+    #   - Default localhost:9092 is only right if you run Kafka natively on
+    #     your machine. With THIS project's docker-compose, a process running
+    #     on your host must use localhost:29092 (the EXTERNAL listener) —
+    #     see docker-compose.yml.
+    # Our KafkaConfig.java reads this value with @Value("${spring.kafka.bootstrap-servers}").
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      # The consumer GROUP name. Kafka uses it to (a) remember how far this
+      # service has read in each topic ("committed offsets") and (b) share
+      # partitions among multiple instances of the same service. If you ran
+      # two query-executor containers with the same group-id, each request
+      # would be processed by exactly ONE of them (with only 1 partition per
+      # topic here, in practice only one instance would get any work).
+      # KafkaConfig.java reads this value too.
+      group-id: query-executor

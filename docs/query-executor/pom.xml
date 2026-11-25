@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+================================================================================
+ query-executor/pom.xml — build file for the SQL-running microservice
+ (guide step 10)
+================================================================================
+
+ WHAT THIS SERVICE IS
+   A headless Spring Boot app (no web server, no UI). It sits there listening
+   on the Kafka topic "query.execute.request". When a request arrives, it opens
+   a JDBC connection to whatever PostgreSQL database the request names, runs
+   the SQL, and publishes the rows on "query.execute.response".
+
+ ITS DEPENDENCIES, IN ONE SENTENCE EACH
+   common                -> the DTO classes it receives/sends
+   spring-boot-starter   -> core Spring Boot (DI container, config, logging)
+   spring-kafka          -> @KafkaListener, KafkaTemplate, JSON (de)serializers
+   postgresql            -> the JDBC driver, needed only at RUNTIME
+================================================================================
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>   <!-- POM format version -->
+
+    <!-- Inherit everything from the root querybridge POM (Java 21, Boot versions...). -->
+    <parent>
+        <groupId>com.querybridge</groupId>
+        <artifactId>querybridge</artifactId>
+        <version>1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>query-executor</artifactId>   <!-- this module's name; jar = query-executor-1.0-SNAPSHOT.jar -->
+    <name>QueryBridge Query Executor</name>
+    <description>Executes SQL queries against user databases via Kafka</description>
+
+    <dependencies>
+        <!-- Our shared DTOs. No version needed: the parent's <dependencyManagement>
+             supplies 1.0-SNAPSHOT. -->
+        <dependency>
+            <groupId>com.querybridge</groupId>
+            <artifactId>common</artifactId>
+        </dependency>
+        <!--
+          The PLAIN Spring Boot starter (not "-web"). It brings the Spring
+          container, auto-configuration, YAML config loading and logging
+          (Logback + SLF4J). It does NOT bring Tomcat, so this app has no HTTP
+          server at all — it only talks Kafka. (application.yml also forces
+          web-application-type: none, belt and braces.)
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter</artifactId>
+        </dependency>
+        <!--
+          Spring for Apache Kafka. Gives us:
+            - @KafkaListener  (receive messages by annotating a method)
+            - KafkaTemplate   (send messages)
+            - JsonSerializer / JsonDeserializer (Java object <-> JSON bytes)
+          It pulls in the official kafka-clients library transitively.
+        -->
+        <dependency>
+            <groupId>org.springframework.kafka</groupId>
+            <artifactId>spring-kafka</artifactId>
+        </dependency>
+        <!--
+          The PostgreSQL JDBC driver.
+
+          scope = runtime: "not on the classpath while COMPILING, only while
+          RUNNING". Why does that work? Because QueryService only uses the
+          standard java.sql interfaces (Connection, Statement, ResultSet...).
+          At runtime, DriverManager.getConnection("jdbc:postgresql://...")
+          finds the PostgreSQL driver automatically (JDBC 4 drivers register
+          themselves through Java's ServiceLoader mechanism). Our code never
+          mentions a PostgreSQL class by name, so it doesn't need it to compile.
+          Using runtime scope prevents you from accidentally coding against
+          driver-specific classes.
+        -->
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!--
+              spring-boot-maven-plugin repackages the normal jar into a runnable
+              "fat jar": your classes + every dependency jar inside it + a
+              special launcher, so `java -jar query-executor-1.0-SNAPSHOT.jar`
+              just works. That fat jar is what the Dockerfile copies into the
+              container. Its config (main class detection, the "repackage" goal)
+              comes pre-set from spring-boot-starter-parent, so it needs no
+              <configuration> here.
+            -->
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+</project>

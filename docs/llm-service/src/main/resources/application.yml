@@ -1,0 +1,42 @@
+# ==============================================================================
+# llm-service/src/main/resources/application.yml   (guide step 18)
+# ==============================================================================
+# ${NAME:default} = "env var NAME if set, else default" (see the executor's
+# application.yml for the longer explanation).
+# ==============================================================================
+
+server:
+  # The embedded Tomcat port. Tomcat starts because spring-boot-starter-web is
+  # a dependency, but there are no endpoints, so nothing useful lives here.
+  # Inside Docker this port isn't even published (docker-compose has no
+  # `ports:` for llm-service).
+  port: 8081
+
+spring:
+  kafka:
+    # Kafka broker address. docker-compose sets KAFKA_BOOTSTRAP_SERVERS=kafka:9092.
+    # Running this service on your host against the compose Kafka? Use
+    # localhost:29092 (the EXTERNAL listener), not the 9092 default.
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      # Consumer group for BOTH listeners in this service (descriptions and SQL).
+      # Read by KafkaConfig.java via @Value.
+      group-id: llm-service
+
+# ------------------------------------------------------------------------------
+# `llm:` is NOT a Spring Boot setting. It's a custom section this project made
+# up. Spring doesn't care about the name; LlmService reads these keys with
+# @Value("${llm.api-key}") etc. Putting them here (instead of hard-coding)
+# means you can switch providers by changing env vars only.
+# ------------------------------------------------------------------------------
+llm:
+  # Your API key. Default is EMPTY (note the colon with nothing after it), so if
+  # OPENAI_API_KEY isn't set, the service still STARTS fine, but every request
+  # fails with "OpenAI API key is not configured (llm.api-key)" — LlmService
+  # checks this before each call. docker-compose passes it from your .env file.
+  api-key: ${OPENAI_API_KEY:}
+  # Base URL of any OpenAI-COMPATIBLE API. LlmService appends "/chat/completions".
+  # OpenAI: https://api.openai.com/v1 ; DeepSeek: https://api.deepseek.com ; etc.
+  api-url: ${OPENAI_API_URL:https://api.openai.com/v1}
+  # Model name sent in every request body ("model": "gpt-4o-mini").
+  model: ${OPENAI_MODEL:gpt-4o-mini}

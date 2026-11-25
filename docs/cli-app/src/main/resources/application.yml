@@ -1,0 +1,32 @@
+# ==============================================================================
+# cli-app/src/main/resources/application.yml   (guide step 25)
+# ==============================================================================
+
+spring:
+  main:
+    # Don't print the big ASCII-art "Spring" banner at startup — it would
+    # clutter a terminal app. (You'll still see normal startup log lines.)
+    banner-mode: off
+  shell:
+    interactive:
+      # Run Spring Shell in INTERACTIVE mode: show the `querybridge> ` prompt and
+      # keep reading commands until you quit. (true is already the default; it's
+      # stated explicitly here.) Spring Shell also has a non-interactive mode
+      # where you pass a command as program arguments, run it once, and exit.
+      enabled: true
+  kafka:
+    # Kafka address. docker-compose's `cli` service sets kafka:9092.
+    # Running the jar on your host (README "Option B")? Set
+    #   KAFKA_BOOTSTRAP_SERVERS=localhost:29092
+    # — that's the EXTERNAL listener docker-compose publishes for the host.
+    # Without it, the default localhost:9092 is wrong for this compose setup
+    # and the app will hang/log connection errors at startup while its Kafka
+    # admin client tries to create topics.
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      # Default consumer group for this app. In PRACTICE it's never used: each
+      # @KafkaListener in KafkaResponseHandler sets its OWN groupId
+      # ("cli-desc-response", "cli-sql-response", "cli-exec-response"), and the
+      # annotation's groupId overrides this value. KafkaConfig still reads it
+      # with @Value and puts it into the consumer factories as a fallback.
+      group-id: cli-app

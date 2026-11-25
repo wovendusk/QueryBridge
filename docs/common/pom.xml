@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+================================================================================
+ common/pom.xml — the build file for the SHARED DTO LIBRARY (guide step 2)
+================================================================================
+
+ WHAT THIS MODULE IS
+   "common" is a tiny, plain Java library. It contains ONLY data classes (DTOs,
+   "Data Transfer Objects"): the Java shapes of the messages that the three
+   apps send to each other over Kafka. No Spring, no Kafka, no logic.
+
+   Every app (cli-app, llm-service, query-executor) lists "common" as a
+   dependency. That is how all three agree on what a "SqlGenerateRequest"
+   looks like.
+
+ WHAT IS NOTABLY MISSING HERE
+   - There is no <build><plugins> with spring-boot-maven-plugin. Good: this
+     module must be a normal jar (classes at the root of the jar), so that the
+     apps can depend on it. Maven's default jar packaging takes care of that.
+   - There is no <packaging> tag, so packaging defaults to "jar".
+================================================================================
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>   <!-- POM format version, always 4.0.0 -->
+
+    <!-- "My parent is the root querybridge POM." This is how this module inherits
+         Java 21, Spring Boot's version table, and the groupId/version. Since the
+         parent is literally one folder up (../pom.xml), Maven finds it on disk
+         by default — no <relativePath> needed. -->
+    <parent>
+        <groupId>com.querybridge</groupId>
+        <artifactId>querybridge</artifactId>
+        <version>1.0-SNAPSHOT</version>
+    </parent>
+
+    <!-- Only the artifactId is given. groupId and version are INHERITED from the
+         parent (com.querybridge / 1.0-SNAPSHOT). Full coordinates:
+         com.querybridge:common:1.0-SNAPSHOT -->
+    <artifactId>common</artifactId>
+    <name>QueryBridge Common DTOs</name>
+
+    <dependencies>
+        <!--
+          jackson-databind = the JSON library. Spring Kafka's JsonSerializer /
+          JsonDeserializer use Jackson under the hood to turn these DTOs into
+          JSON bytes and back.
+
+          Honest note: if you read the DTO classes, NONE of them import anything
+          from Jackson (no @JsonProperty etc.) — they are plain Java classes with
+          getters/setters. So this dependency isn't actually needed to COMPILE
+          common. It's harmless (the apps get Jackson anyway through
+          spring-kafka / spring-boot), and it documents "these classes are meant
+          to be JSON-serialised", but it's not strictly required.
+
+          No <version>: inherited from Spring Boot's dependency management.
+        -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+    </dependencies>
+</project>

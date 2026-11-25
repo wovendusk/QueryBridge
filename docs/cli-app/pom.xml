@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+================================================================================
+ cli-app/pom.xml — build file for the interactive terminal app (guide step 24)
+================================================================================
+
+ WHAT THIS APP IS
+   The only part of QueryBridge a human touches. It's a Spring Boot app whose
+   "UI" is an interactive shell (prompt: `querybridge> `), built with Spring
+   Shell. It:
+     - connects DIRECTLY to your PostgreSQL (via JDBC) to read the schema and
+       sample rows,
+     - talks to the two backend services only via Kafka,
+     - validates every SQL the LLM produces with JSqlParser before showing it.
+
+ DEPENDENCIES
+   common               -> shared DTOs
+   spring-boot-starter  -> core Boot (no web server: it's a terminal app)
+   spring-shell-starter -> the interactive shell (commands, prompt, history,
+                           tab completion), built on the JLine terminal library
+   spring-kafka         -> KafkaTemplate + @KafkaListener for request/reply
+   postgresql           -> JDBC driver, used by ConnectionManager at `connect`
+   jsqlparser           -> parses SQL into a syntax tree for ValidatorService
+================================================================================
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>   <!-- POM format version -->
+
+    <!-- Inherit from the root POM. -->
+    <parent>
+        <groupId>com.querybridge</groupId>
+        <artifactId>querybridge</artifactId>
+        <version>1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>cli-app</artifactId>   <!-- jar: cli-app-1.0-SNAPSHOT.jar (the README runs this one directly) -->
+    <name>QueryBridge CLI App</name>
+    <description>Interactive CLI for QueryBridge database assistant</description>
+
+    <dependencies>
+        <!-- Shared DTOs. -->
+        <dependency>
+            <groupId>com.querybridge</groupId>
+            <artifactId>common</artifactId>
+        </dependency>
+        <!-- Core Spring Boot, no web server. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter</artifactId>
+        </dependency>
+        <!--
+          Spring Shell. No <version> here: it comes from the spring-shell-dependencies
+          BOM (3.3.3) imported in the root POM's <dependencyManagement>.
+          With this on the classpath, Spring Boot auto-configures a shell that
+          takes over the terminal after startup, prints a prompt, reads lines and
+          dispatches them to methods annotated with @ShellMethod. It also brings
+          built-in commands: help, clear, history, script, stacktrace, version, quit.
+        -->
+        <dependency>
+            <groupId>org.springframework.shell</groupId>
+            <artifactId>spring-shell-starter</artifactId>
+        </dependency>
+        <!-- Kafka support (version from Spring Boot's dependency management). -->
+        <dependency>
+            <groupId>org.springframework.kafka</groupId>
+            <artifactId>spring-kafka</artifactId>
+        </dependency>
+        <!-- PostgreSQL JDBC driver, runtime-only (see query-executor/pom.xml for why). -->
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <!--
+          JSqlParser: turns an SQL string into a tree of Java objects
+          (Select, PlainSelect, Column, Table, Join, ...) that ValidatorService
+          walks to find every table and column the SQL mentions.
+          Not managed by Spring Boot, so the version is given explicitly, via the
+          ${jsqlparser.version} property (4.9) defined in the root POM.
+        -->
+        <dependency>
+            <groupId>com.github.jsqlparser</groupId>
+            <artifactId>jsqlparser</artifactId>
+            <version>${jsqlparser.version}</version>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!-- Build a runnable fat jar: `java -jar cli-app/target/cli-app-1.0-SNAPSHOT.jar`. -->
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+</project>

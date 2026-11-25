@@ -1,0 +1,186 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+================================================================================
+ pom.xml  (the PARENT / ROOT POM)  — READ THIS FIRST (guide step 1)
+================================================================================
+
+ WHAT IS A POM?
+   POM = "Project Object Model". It is Maven's build file, the Maven equivalent
+   of a build.gradle. It says: what is this project called, what libraries does
+   it need, and how do I build it.
+
+ WHY ARE THERE FIVE pom.xml FILES IN THIS PROJECT?
+   QueryBridge is a "multi-module Maven project". There is one PARENT pom (this
+   file, at the root of the repo) and four CHILD poms, one inside each module
+   folder:
+
+        querybridge/pom.xml              <- this file: the parent, builds nothing itself
+        ├── common/pom.xml               <- shared DTO classes (a plain library jar)
+        ├── cli-app/pom.xml              <- the interactive terminal app
+        ├── llm-service/pom.xml          <- the service that talks to OpenAI
+        └── query-executor/pom.xml       <- the service that runs SQL on your DB
+
+   When you run `mvn clean package` at the root, Maven reads this file, sees
+   the <modules> list below, works out the order in which modules depend on one
+   another (common has to be built first, because all three apps depend on
+   it), and builds them all in one go. That ordering step is called the
+   "reactor".
+
+ WHY DOES A MULTI-MODULE SETUP HELP HERE?
+   The three apps are separate programs (separate JVMs, separate Docker
+   containers) that talk to each other only through Kafka. But they all need
+   to agree on the SHAPE of the messages they send: if the CLI sends a
+   "SqlGenerateRequest" JSON, the LLM service must be able to read it back
+   into the same Java class. Putting those classes in one shared module
+   ("common") means there is exactly ONE definition of each message, and every
+   app compiles against it. Change a field once and every app picks it up.
+
+ WHAT DOES THIS PARENT DO FOR ITS CHILDREN?
+   1. Inheritance: every child says <parent>querybridge</parent>, so it inherits
+      the Java version, the plugin config and the dependency versions declared
+      here.
+   2. Version pinning (<dependencyManagement>): versions are declared ONCE,
+      here, so children can list a dependency without a <version> tag and
+      still get a consistent version everywhere.
+================================================================================
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <!-- Always 4.0.0 for Maven 2/3. It is the version of the POM *format*, not of your project. -->
+    <modelVersion>4.0.0</modelVersion>
+
+    <!--
+      THE GRANDPARENT: spring-boot-starter-parent
+      Our parent POM itself has a parent: Spring Boot's official "starter parent".
+      So the inheritance chain is:
+
+          spring-boot-starter-parent 3.3.5   (Spring's)
+              └── querybridge (this file)
+                      ├── common
+                      ├── cli-app
+                      ├── llm-service
+                      └── query-executor
+
+      What do we get from spring-boot-starter-parent?
+        - A huge, tested list of library versions (Jackson, Kafka client,
+          spring-kafka, PostgreSQL driver, SLF4J, ...). That's why the child poms
+          can write <artifactId>spring-kafka</artifactId> with NO version: Boot
+          3.3.5 already knows which spring-kafka version goes with it (3.2.4 —
+          you can see that jar inside the built CLI jar).
+        - Sensible defaults: UTF-8 encoding, compiler settings driven by the
+          <java.version> property we set below, and pre-configured settings for
+          spring-boot-maven-plugin (the plugin that builds runnable "fat jars").
+    -->
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.3.5</version>
+        <!-- Empty relativePath = "don't look for this parent on disk next to me,
+             download it from Maven Central". Without this, Maven would first look
+             in ../pom.xml and print a warning when it isn't there. -->
+        <relativePath/>
+    </parent>
+
+    <!-- THE PROJECT'S OWN COORDINATES. Every Maven artifact is identified by
+         groupId + artifactId + version (the "GAV"). -->
+    <groupId>com.querybridge</groupId>          <!-- like a Java package: who owns it -->
+    <artifactId>querybridge</artifactId>        <!-- the name of this particular artifact -->
+    <version>1.0-SNAPSHOT</version>             <!-- "SNAPSHOT" = work in progress, not a fixed release -->
+
+    <!--
+      packaging = pom  is the key line that makes this an AGGREGATOR/PARENT.
+      Normal modules have packaging "jar" (the default). "pom" means: this
+      module produces no jar and has no Java code; it only exists to hold
+      shared configuration and the list of child modules.
+    -->
+    <packaging>pom</packaging>
+    <name>QueryBridge</name>                    <!-- human-friendly name shown in build logs -->
+    <description>AI-powered CLI database assistant with microservices and Kafka</description>
+
+    <!--
+      THE CHILD MODULES. Each entry is a FOLDER NAME relative to this file; Maven
+      will look for <folder>/pom.xml. The order here does NOT need to be the build
+      order — Maven sorts them by their dependencies (common first).
+    -->
+    <modules>
+        <module>common</module>             <!-- shared DTOs (Kafka message classes) -->
+        <module>cli-app</module>            <!-- the terminal UI the user types into -->
+        <module>llm-service</module>        <!-- calls the OpenAI-compatible API -->
+        <module>query-executor</module>     <!-- runs SQL on the user's PostgreSQL -->
+    </modules>
+
+    <!--
+      PROPERTIES = variables. You can reference them anywhere as ${name}.
+    -->
+    <properties>
+        <!-- Read by spring-boot-starter-parent to configure the Java compiler:
+             compile as Java 21 (so we can use records, pattern matching in
+             instanceof, text blocks, Stream.toList(), etc. — all of which this
+             codebase uses). -->
+        <java.version>21</java.version>
+        <!-- Spring Shell is NOT part of Spring Boot's managed version list, so we
+             have to pick its version ourselves. Used in <dependencyManagement> below. -->
+        <spring-shell.version>3.3.3</spring-shell.version>
+        <!-- JSqlParser (the SQL parser used by the CLI's validator) is also not
+             managed by Boot, so we pin it here and reference it from cli-app/pom.xml. -->
+        <jsqlparser.version>4.9</jsqlparser.version>
+    </properties>
+
+    <!--
+      <dependencyManagement>  vs  <dependencies>  — AN IMPORTANT DISTINCTION
+      -----------------------------------------------------------------------
+      <dependencies> means "I actually NEED this library; put it on my classpath".
+      <dependencyManagement> means "IF any child ever asks for this library, use
+      THIS version". It adds nothing to anybody's classpath by itself. It is a
+      version lookup table.
+
+      So the entries below don't make every module depend on "common" or on
+      Spring Shell. They just let a child write:
+
+          <dependency>
+              <groupId>com.querybridge</groupId>
+              <artifactId>common</artifactId>
+          </dependency>
+
+      with no <version>, and Maven fills in the version from here.
+    -->
+    <dependencyManagement>
+        <dependencies>
+            <!-- Our own shared module. ${project.version} = 1.0-SNAPSHOT, so all
+                 apps always use the common jar from the same build. -->
+            <dependency>
+                <groupId>com.querybridge</groupId>
+                <artifactId>common</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <!--
+              A "BOM import". spring-shell-dependencies is not a library; it is a
+              POM that itself contains a <dependencyManagement> list of every
+              Spring Shell artifact (spring-shell-starter, spring-shell-core, the
+              JLine terminal library, ...) with matching versions.
+
+              type=pom + scope=import means "copy that whole version table into
+              mine". BOM = "Bill Of Materials". It's how you get a family of
+              libraries that must all be the same version, without listing each
+              one by hand.
+            -->
+            <dependency>
+                <groupId>org.springframework.shell</groupId>
+                <artifactId>spring-shell-dependencies</artifactId>
+                <version>${spring-shell.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+    <!--
+      Notice what is NOT here: no <build><plugins> section. The
+      spring-boot-maven-plugin (the thing that makes a runnable fat jar) is
+      deliberately NOT turned on in the parent. Each of the three APPS turns it on
+      in its own pom. "common" does NOT, because common must stay a normal, thin
+      library jar that other modules can put on their classpath. (A Spring Boot
+      fat jar has its classes under BOOT-INF/classes, so other modules can't use
+      it as a normal dependency.)
+    -->
+</project>
